@@ -23,3 +23,16 @@ Non surtout en production.
 
 ## Etape 2
 
+# Question 5
+
+Cela pemet d'éxécuter une commande à l'intérieur du conteneur. Donc pour redis, cela se fait directement dans le conteneur redis
+
+## Etape 3
+
+# Question 6
+
+Cela fonctionne puisque on est en local (locahost et le port de notre machine)
+
+# Question 7
+
+Non uniquement si les tables sont vides
