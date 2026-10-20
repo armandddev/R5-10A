@@ -37,3 +37,19 @@ Il gère les connexions entre l'app et Reddis. A chaque requête http, on aurait
 # Question 9
 
 Oui car le dernier du top 5 est renvoyé en premier. Il est dangereux puisque il n'y a pas de message d'erreur mais le top n'est pas cohérent.
+
+# Question 12
+Aucune ligne des endpoints n’a été modifiée, car le cache implémente la même interface IGameCatalog que MongoGameCatalog.
+Le choix de la séance 2 est l’injection de dépendances via une interface, qui permet de remplacer l’implémentation sans modifier le code qui l’utilise.
+
+# Question 13
+Le premier appel est plus lent que les suivants. Le gain peut être faible avec peu de jeux et peu de requêtes. Un cache devient réellement décisif avec beaucoup de données, des accès fréquents et une base source lente ou fortement sollicitée.
+
+# Question 14
+ Les joueurs peuvent voir l’ancien titre pendant 60 secondes maximum, car le cache conserve les données jusqu’à expiration du TTL.
+
+Deux stratégies pour réduire ce délai :
+
+Invalider le cache après une modification : les données sont actualisées immédiatement, mais il faut gérer l’invalidation correctement.
+
+Réduire le TTL : les données deviennent plus rapidement à jour, mais les accès à MongoDB augmentent.
