@@ -27,3 +27,7 @@ Accept: application/json
 ### Séance 2 — top 3
 GET {{host}}/games/top/3
 Accept: application/json
+
+### 
+GET {{host}}/leaderboard/top/5
+Accept: application/json
