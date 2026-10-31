@@ -4,6 +4,8 @@ using PixelHub.Api.Models;
 using MongoDB.Driver;
 using PixelHub.Api.Repositories;
 using StackExchange.Redis;
+using Neo4j.Driver;
+using PixelHub.Api.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -17,13 +19,10 @@ builder.Services.AddSingleton<IMongoDatabase>(sp =>
     sp.GetRequiredService<IMongoClient>()
       .GetDatabase(builder.Configuration["Mongo:Database"]));
 
-builder.Services.AddSingleton<IGameCatalog, MongoGameCatalog>();
-
 builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
     ConnectionMultiplexer.Connect(builder.Configuration.GetConnectionString("Redis")!));
 
 builder.Services.AddSingleton<ILeaderboard, RedisLeaderboard>();
-
 builder.Services.AddSingleton<RedisMatchmakingQueue>();
 
 builder.Services.AddSingleton<MongoGameCatalog>();
@@ -31,6 +30,19 @@ builder.Services.AddSingleton<IGameCatalog>(sp =>
     new CachedGameCatalog(
         sp.GetRequiredService<MongoGameCatalog>(),
         sp.GetRequiredService<IConnectionMultiplexer>()));
+
+builder.Services.AddSingleton<IDriver>(_ =>
+    GraphDatabase.Driver(
+        builder.Configuration["Neo4j:Uri"],
+        AuthTokens.Basic(
+            builder.Configuration["Neo4j:User"],
+            builder.Configuration["Neo4j:Password"])));
+
+builder.Services.AddSingleton<ISocialGraph, Neo4jSocialGraph>();
+
+builder.Services.AddSingleton<RedisSales>();
+builder.Services.AddScoped<ShopService>();
+builder.Services.AddScoped<PlayerProfileService>();
 
 var app = builder.Build();
 
@@ -64,6 +76,14 @@ app.MapGet("/games/genre/{genre}", async (string genre, IGameCatalog catalog) =>
 app.MapGet("/games/top/{count:int}", async (int count, IGameCatalog catalog) =>
     await catalog.GetTopRatedAsync(count));
 
+app.MapGet("/games/timed", async (IGameCatalog catalog) =>
+{
+    var chrono = System.Diagnostics.Stopwatch.StartNew();
+    var jeux = await catalog.GetAllAsync();
+    chrono.Stop();
+    return new { nombre = jeux.Count, millisecondes = chrono.Elapsed.TotalMilliseconds };
+});
+
 app.MapPost("/leaderboard/{pseudo}/points/{points:double}",
     async (string pseudo, double points, ILeaderboard lb) =>
     { await lb.AddPointsAsync(pseudo, points); return Results.Ok(); });
@@ -85,12 +105,49 @@ app.MapPost("/matchmaking/match", async (RedisMatchmakingQueue file) =>
         ? Results.Ok(new { joueur1, joueur2 })
         : Results.NoContent());
 
-app.MapGet("/games/timed", async (IGameCatalog catalog) =>
+app.MapGet("/social/{pseudo}/friends",
+    async (string pseudo, ISocialGraph g) => await g.GetFriendsAsync(pseudo));
+
+app.MapGet("/social/{pseudo}/recommendations",
+    async (string pseudo, int? depth, ISocialGraph g) =>
+        await g.RecommendGamesAsync(pseudo, depth ?? 2));
+
+app.MapGet("/social/{pseudo}/friend-suggestions",
+    async (string pseudo, ISocialGraph g) => await g.SuggestFriendsAsync(pseudo));
+
+app.MapPost("/shop/{pseudo}/buy/{titre}", async (string pseudo, string titre, ShopService shop) =>
 {
-    var chrono = System.Diagnostics.Stopwatch.StartNew();
-    var jeux = await catalog.GetAllAsync();
-    chrono.Stop();
-    return new { nombre = jeux.Count, millisecondes = chrono.Elapsed.TotalMilliseconds };
+    var r = await shop.BuyAsync(pseudo, titre);
+    return r.Statut switch
+    {
+        AchatStatut.Ok               => Results.Ok(r.Recu),
+        AchatStatut.JeuInconnu       => Results.NotFound(new { erreur = $"Jeu inconnu : {titre}" }),
+        AchatStatut.JoueurInconnu    => Results.NotFound(new { erreur = $"Joueur inconnu : {pseudo}" }),
+        AchatStatut.SoldeInsuffisant => Results.Conflict(new { erreur = "Solde insuffisant" }),
+        AchatStatut.DejaPossede      => Results.Conflict(new { erreur = "Jeu déjà acheté" }),
+        _                            => Results.StatusCode(500)
+    };
+});
+
+app.MapGet("/shop/bestsellers", async (RedisSales ventes) => await ventes.GetTopAsync(3));
+
+app.MapGet("/players/{pseudo}/profile", async (string pseudo, PlayerProfileService profils) =>
+    await profils.GetAsync(pseudo) is { } profil ? Results.Ok(profil) : Results.NotFound());
+
+app.MapPost("/admin/resync", async (PixelHubContext db, ISocialGraph g, RedisSales ventes) =>
+{
+    var achats = await db.Purchases
+        .Join(db.Players, a => a.PlayerId, p => p.Id, (a, p) => new { p.Pseudo, a.Titre, a.Date })
+        .ToListAsync();
+
+    foreach (var a in achats)                                      // MERGE : rejouable sans doublon
+        await g.AddOwnershipAsync(a.Pseudo, a.Titre, a.Date.Year);
+
+    await ventes.ReplaceAllAsync(achats
+        .GroupBy(a => a.Titre)
+        .Select(groupe => new GameSales(groupe.Key, groupe.Count())));
+
+    return Results.Ok(new { achatsRejoues = achats.Count });
 });
 
 app.Run();

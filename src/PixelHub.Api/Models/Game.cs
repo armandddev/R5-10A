@@ -28,4 +28,7 @@ public class Game
 
     [BsonElement("tags")]
     public List<string> Tags { get; set; } = new();
+
+    [BsonElement("prix")]
+    public int Prix { get; set; }
 }

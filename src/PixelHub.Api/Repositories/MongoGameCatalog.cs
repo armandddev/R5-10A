@@ -23,4 +23,19 @@ public class MongoGameCatalog : IGameCatalog
                    .SortByDescending(g => g.Note)
                    .Limit(count)
                    .ToListAsync();
+
+    public async Task<Game?> GetByTitleAsync(string titre) =>
+        await _jeux.Find(g => g.Titre == titre).FirstOrDefaultAsync();
+
+    public async Task<List<Game>> GetByTitlesAsync(IEnumerable<string> titres) =>
+        await _jeux.Find(Builders<Game>.Filter.In(g => g.Titre, titres)).ToListAsync();
+
+    public async Task<List<GenreStats>> GetStatsByGenreAsync() =>
+        await _jeux.Aggregate()
+            .Group(g => g.Genre, group => new GenreStats(
+                group.Key,
+                group.Average(g => g.Note),
+                group.Count()))
+            .SortByDescending(s => s.NoteMoyenne)
+            .ToListAsync();
 }

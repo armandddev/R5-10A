@@ -20,16 +20,29 @@ public class CachedGameCatalog : IGameCatalog
 
     public async Task<List<Game>> GetAllAsync()
     {
-        var cached = await _cache.StringGetAsync(KeyAll);
-        if (cached.HasValue)
-            return JsonSerializer.Deserialize<List<Game>>((string)cached!)!;
+        try
+        {
+            var cached = await _cache.StringGetAsync(KeyAll);
+            if (cached.HasValue)                                   // cache hit
+                return JsonSerializer.Deserialize<List<Game>>((string)cached!)!;
+        }
+        catch (Exception e) when (e is RedisException or RedisTimeoutException)
+        {
+            return await _source.GetAllAsync();
+        }
 
-        var jeux = await _source.GetAllAsync();
-        await _cache.StringSetAsync(KeyAll, JsonSerializer.Serialize(jeux), Ttl);
+        var jeux = await _source.GetAllAsync();                // cache miss
+        try
+        {
+            await _cache.StringSetAsync(KeyAll, JsonSerializer.Serialize(jeux), Ttl);
+        }
+        catch (Exception e) when (e is RedisException or RedisTimeoutException) { }
         return jeux;
     }
 
     public Task<List<Game>> GetByGenreAsync(string genre) => _source.GetByGenreAsync(genre);
     public Task<List<Game>> GetTopRatedAsync(int count) => _source.GetTopRatedAsync(count);
+    public Task<Game?> GetByTitleAsync(string titre) => _source.GetByTitleAsync(titre);
+    public Task<List<Game>> GetByTitlesAsync(IEnumerable<string> titres) => _source.GetByTitlesAsync(titres);
     public Task<List<GenreStats>> GetStatsByGenreAsync() => _source.GetStatsByGenreAsync();
 }
